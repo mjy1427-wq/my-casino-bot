@@ -1,0 +1,1 @@
+print("G COIN BOT STARTED")
