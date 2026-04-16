@@ -1,172 +1,161 @@
 import random
 import json
-from PIL import Image, ImageDraw
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import os
+from PIL import Image
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
 TOKEN = "8484299407:AAFgHyNXSHEqrVaij1ocbf6933DGyp7-f-Y"
+ADMIN_ID = 7476630349
 DB_FILE = "db.json"
 
 # =========================
-# 💾 DB 로드/저장
+# 💾 DB
 # =========================
 def load_db():
-    try:
-        with open(DB_FILE, "r") as f:
-            return json.load(f)
-    except:
+    if not os.path.exists(DB_FILE):
         return {"vault": 1000000, "users": {}}
+    with open(DB_FILE, "r") as f:
+        return json.load(f)
 
 def save_db(db):
     with open(DB_FILE, "w") as f:
         json.dump(db, f)
 
-
-# =========================
-# 🃏 카드 덱
-# =========================
-suits = ["hearts", "diamonds", "clubs", "spades"]
-values = ["2","3","4","5","6","7","8","9","10","jack","queen","king","ace"]
-deck = [f"{v}_of_{s}" for s in suits for v in values]
-
-
-# =========================
-# 🎲 카드
-# =========================
-def draw():
-    return random.choice(deck)
-
-
-def score(cards):
-    total = 0
-    for c in cards:
-        v = c.split("_")[0]
-        total += int(v) if v.isdigit() else 0
-    return total % 10
-
-
-# =========================
-# 🎰 바카라 (3rd card 포함)
-# =========================
-def baccarat_game():
-    player = [draw(), draw()]
-    banker = [draw(), draw()]
-
-    ps = score(player)
-    bs = score(banker)
-
-    player_third = None
-
-    # PLAYER 3rd card
-    if ps <= 5:
-        player_third = draw()
-        player.append(player_third)
-        ps = score(player)
-
-    # BANKER rule (단순화)
-    if bs <= 5:
-        banker.append(draw())
-        bs = score(banker)
-
-    if ps > bs:
-        result = "PLAYER"
-    elif bs > ps:
-        result = "BANKER"
-    else:
-        result = "TIE"
-
-    return player, banker, result
-
-
-# =========================
-# 🖼 이미지 생성
-# =========================
-def make_image(player, banker, result):
-    bg = Image.new("RGB", (900, 500), (0, 120, 0))
-    draw = ImageDraw.Draw(bg)
-
-    draw.text((350, 20), "G COIN CASINO", fill=(255,255,255))
-
-    # PLAYER
-    x = 80
-    draw.text((80, 80), "PLAYER", fill=(255,255,255))
-    for c in player:
-        img = Image.open(f"cards/{c}.png").resize((110,160))
-        bg.paste(img, (x, 120))
-        x += 130
-
-    # BANKER
-    x = 500
-    draw.text((500, 80), "BANKER", fill=(255,255,255))
-    for c in banker:
-        img = Image.open(f"cards/{c}.png").resize((110,160))
-        bg.paste(img, (x, 120))
-        x += 130
-
-    draw.text((350, 430), f"RESULT: {result}", fill=(255,255,0))
-
-    path = "result.png"
-    bg.save(path)
-    return path
-
-
-# =========================
-# 💰 유저 생성
-# =========================
-def get_user(db, user_id):
-    if user_id not in db["users"]:
-        db["users"][user_id] = {
-            "balance": 10000,
-            "inventory": {}
+def get_user(db, uid):
+    if uid not in db["users"]:
+        db["users"][uid] = {
+            "balance": 1000000,
+            "inventory": {},
+            "joined": "2026-01-01"
         }
-    return db["users"][user_id]
-
+    return db["users"][uid]
 
 # =========================
-# 🎮 바카라 명령어
+# 🪨 광물 / 곡괭이
 # =========================
-async def baccarat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+ORES = {
+    "stone": {"tier": 1, "price": 1000},
+    "iron": {"tier": 2, "price": 5000},
+    "gold": {"tier": 3, "price": 20000},
+    "diamond": {"tier": 4, "price": 100000}
+}
+
+PICKAXE_SHOP = {
+    "Wood": {"price": 1000000, "durability": 100, "mult": 1.0, "rate_bonus": 0},
+    "Stone": {"price": 5000000, "durability": 300, "mult": 1.5, "rate_bonus": 5},
+    "Iron": {"price": 15000000, "durability": 500, "mult": 2.0, "rate_bonus": 10},
+    "Gold": {"price": 50000000, "durability": 1000, "mult": 3.0, "rate_bonus": 20},
+    "Diamond": {"price": 250000000, "durability": 5000, "mult": 5.0, "rate_bonus": 35},
+    "Orichalcon": {"price": 1000000000, "durability": 10000, "mult": 10.0, "rate_bonus": 60}
+}
+
+# =========================
+# 👤 가입
+# =========================
+async def join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = load_db()
-    user_id = str(update.effective_user.id)
-    user = get_user(db, user_id)
+    uid = str(update.effective_user.id)
 
-    player, banker, result = baccarat_game()
-    img = make_image(player, banker, result)
+    if uid not in db["users"]:
+        db["users"][uid] = {
+            "balance": 1000000,
+            "inventory": {},
+            "joined": str(update.message.date)
+        }
+        save_db(db)
 
-    # 💰 간단 베팅 처리 (기본 1000)
-    bet = 1000
+    await update.message.reply_text("✅ 가입 완료 + 1,000,000 지급")
 
-    if result == "PLAYER":
-        user["balance"] += bet
-    elif result == "BANKER":
-        user["balance"] += int(bet * 0.95)
-    else:
-        user["balance"] += bet * 8
+# =========================
+# 💰 내정보
+# =========================
+async def myinfo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = load_db()
+    uid = str(update.effective_user.id)
+    user = get_user(db, uid)
 
-    save_db(db)
-
-    await update.message.reply_photo(
-        photo=open(img, "rb"),
-        caption=f"🎰 {result}\n💰 BALANCE: {user['balance']}"
+    await update.message.reply_text(
+        f"👤 ID: {uid}\n"
+        f"💰 GCOIN: {user['balance']}\n"
+        f"📅 가입일: {user['joined']}"
     )
-
 
 # =========================
 # ⛏ 채광
 # =========================
 async def mine(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     db = load_db()
-    user_id = str(update.effective_user.id)
-    user = get_user(db, user_id)
+    uid = str(update.effective_user.id)
+    user = get_user(db, uid)
 
-    items = ["gold", "silver", "iron"]
-    item = random.choice(items)
+    inv = user.setdefault("inventory", {})
 
-    user["inventory"][item] = user["inventory"].get(item, 0) + 1
+    pickaxe = "Wood"
+    for p in PICKAXE_SHOP:
+        if p in inv:
+            pickaxe = p
+            break
+
+    data = PICKAXE_SHOP[pickaxe]
+
+    if random.randint(1, 100) <= 5 + data["rate_bonus"]:
+        ore = "diamond"
+    else:
+        ore = random.choice(["stone", "iron", "gold"])
+
+    amount = int(random.randint(1, 5) * data["mult"])
+
+    inv[ore] = inv.get(ore, 0) + amount
+
+    if pickaxe in inv:
+        inv[pickaxe]["durability"] -= 1
+
+    user["inventory"] = inv
     save_db(db)
 
-    await update.message.reply_text(f"⛏ 획득: {item}")
+    ore_data = ORES[ore]
 
+    await update.message.reply_text(
+        f"⛏ 채광 성공!\n"
+        f"광물: {ore.upper()} (N{ore_data['tier']})\n"
+        f"가격: {ore_data['price']}\n"
+        f"곡괭이: {pickaxe}\n"
+        f"내구도: {inv[pickaxe]['durability'] if pickaxe in inv else 0}"
+    )
+
+# =========================
+# 🎒 인벤
+# =========================
+async def inventory(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = load_db()
+    uid = str(update.effective_user.id)
+    user = get_user(db, uid)
+
+    inv = user.get("inventory", {})
+
+    text = "🎒 INVENTORY\n\n"
+    for k, v in inv.items():
+        text += f"{k}: {v}\n"
+
+    await update.message.reply_text(text)
+
+# =========================
+# 🏆 랭킹
+# =========================
+async def ranking(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    db = load_db()
+
+    users = db["users"]
+    sorted_users = sorted(users.items(), key=lambda x: x[1]["balance"], reverse=True)
+
+    text = "🏆 TOP 10\n\n"
+    for i, (uid, u) in enumerate(sorted_users[:10]):
+        title = "KING" if i == 0 else "TOP"
+        text += f"{i+1}. {uid} - {u['balance']} ({title})\n"
+
+    await update.message.reply_text(text)
 
 # =========================
 # 💸 송금
@@ -174,36 +163,85 @@ async def mine(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = load_db()
 
-    user_id = str(update.effective_user.id)
-    user = get_user(db, user_id)
-
-    if len(context.args) < 2:
-        return await update.message.reply_text("사용법: .송금 ID 금액")
+    uid = str(update.effective_user.id)
+    user = get_user(db, uid)
 
     target = context.args[0]
     amount = int(context.args[1])
 
-    target_user = get_user(db, target)
+    tuser = get_user(db, target)
 
     if user["balance"] < amount:
         return await update.message.reply_text("잔액 부족")
 
     user["balance"] -= amount
-    target_user["balance"] += amount
+    tuser["balance"] += amount
 
     save_db(db)
 
     await update.message.reply_text("송금 완료")
 
+# =========================
+# 🛒 상점
+# =========================
+async def shop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    text = "⛏ SHOP\n선택하세요"
+
+    keyboard = [
+        [InlineKeyboardButton("Wood", callback_data="buy_Wood")],
+        [InlineKeyboardButton("Stone", callback_data="buy_Stone")],
+        [InlineKeyboardButton("Iron", callback_data="buy_Iron")],
+        [InlineKeyboardButton("Gold", callback_data="buy_Gold")],
+        [InlineKeyboardButton("Diamond", callback_data="buy_Diamond")],
+        [InlineKeyboardButton("Orichalcon", callback_data="buy_Orichalcon")]
+    ]
+
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 # =========================
-# 🚀 실행
+# 🛒 구매
+# =========================
+async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    await query.answer()
+
+    db = load_db()
+    uid = str(query.from_user.id)
+    user = get_user(db, uid)
+
+    item = query.data.replace("buy_", "")
+    data = PICKAXE_SHOP[item]
+
+    if user["balance"] < data["price"]:
+        return await query.message.reply_text("❌ 돈 부족")
+
+    user["balance"] -= data["price"]
+
+    inv = user.setdefault("inventory", {})
+    if item in inv:
+        inv[item]["durability"] += data["durability"]
+    else:
+        inv[item] = {"durability": data["durability"]}
+
+    save_db(db)
+
+    await query.message.reply_text(f"✅ 구매 완료 {item}")
+
+# =========================
+# 🚀 RUN
 # =========================
 app = ApplicationBuilder().token(TOKEN).build()
 
-app.add_handler(CommandHandler("바카라", baccarat))
+app.add_handler(CommandHandler("가입", join))
+app.add_handler(CommandHandler("내정보", myinfo))
 app.add_handler(CommandHandler("채광", mine))
+app.add_handler(CommandHandler("인벤", inventory))
+app.add_handler(CommandHandler("랭킹", ranking))
 app.add_handler(CommandHandler("송금", send))
+app.add_handler(CommandHandler("상점", shop))
+app.add_handler(CallbackQueryHandler(buy))
 
-print("G COIN CASINO STARTED")
+print("BOT STARTED")
 app.run_polling()
